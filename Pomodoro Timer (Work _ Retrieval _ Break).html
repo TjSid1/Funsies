@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pomodoro Timer</title>
+<style>
+:root{
+  --work:#e0645a; --retrieval:#5a8fe0; --break:#5ac98a;
+  --bg:#faf9f7; --card:#ffffff; --text:#2b2b2b; --sub:#6b6b6b; --border:#eae7e2;
+  box-sizing:border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1a18; --card:#242320; --text:#f0eee9; --sub:#a8a49c; --border:#38352f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1b1a18; --card:#242320; --text:#f0eee9; --sub:#a8a49c; --border:#38352f;
+}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  display:flex; align-items:center; justify-content:center;
+  min-height:100%;
+}
+.wrap{ width:100%; max-width:420px; padding:24px 20px; }
+.card{
+  background:var(--card); border:1px solid var(--border); border-radius:20px;
+  padding:28px 24px; text-align:center; transition:box-shadow .3s;
+}
+.phase-label{ font-size:14px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; margin-bottom:6px; }
+.time{ font-size:64px; font-weight:700; font-variant-numeric:tabular-nums; margin:8px 0 18px; }
+.dots{ display:flex; justify-content:center; gap:8px; margin-bottom:20px; }
+.dot{ width:10px; height:10px; border-radius:50%; background:var(--border); }
+.dot.active{ background:currentColor; }
+.controls{ display:flex; gap:10px; justify-content:center; margin-bottom:8px; }
+button{
+  border:none; border-radius:12px; padding:12px 20px; font-size:15px; font-weight:600;
+  cursor:pointer; transition:opacity .15s; font-family:inherit;
+}
+button:active{ opacity:.7; }
+.btn-primary{ background:var(--text); color:var(--bg); flex:1; }
+.btn-secondary{ background:transparent; border:1px solid var(--border); color:var(--text); }
+.count-row{
+  display:flex; align-items:center; justify-content:center; gap:14px;
+  margin-top:22px; padding-top:18px; border-top:1px solid var(--border);
+}
+.count-label{ font-size:13px; color:var(--sub); }
+.count-val{ font-size:20px; font-weight:700; min-width:28px; }
+.count-btn{
+  width:30px; height:30px; border-radius:50%; border:1px solid var(--border);
+  background:transparent; color:var(--text); font-size:16px; padding:0;
+  display:flex; align-items:center; justify-content:center;
+}
+.settings{ margin-top:14px; font-size:12px; color:var(--sub); cursor:pointer; text-decoration:underline; }
+.settings-panel{ display:none; margin-top:14px; text-align:left; font-size:13px; }
+.settings-panel.open{ display:block; }
+.set-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.set-row input{
+  width:60px; padding:6px 8px; border-radius:8px; border:1px solid var(--border);
+  background:var(--bg); color:var(--text); font-size:13px; text-align:center;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="card">
+    <div class="phase-label" id="phaseLabel">WORK</div>
+    <div class="time" id="timeDisplay">25:00</div>
+    <div class="dots" id="dots">
+      <div class="dot active" data-p="0"></div>
+      <div class="dot" data-p="1"></div>
+      <div class="dot" data-p="2"></div>
+    </div>
+    <div class="controls">
+      <button class="btn-primary" id="startBtn">Start</button>
+      <button class="btn-secondary" id="skipBtn">Skip</button>
+      <button class="btn-secondary" id="resetBtn">Reset</button>
+    </div>
+    <div class="count-row">
+      <span class="count-label">Pomodoros done</span>
+      <button class="count-btn" id="decCount">−</button>
+      <span class="count-val" id="countVal">0</span>
+      <button class="count-btn" id="incCount">+</button>
+    </div>
+    <div class="settings" id="settingsToggle">Edit durations</div>
+    <div class="settings-panel" id="settingsPanel">
+      <div class="set-row"><span>Work (min)</span><input type="number" id="setWork" min="1" max="90"></div>
+      <div class="set-row"><span>Active retrieval (min)</span><input type="number" id="setRetrieval" min="1" max="90"></div>
+      <div class="set-row"><span>Break (min)</span><input type="number" id="setBreak" min="1" max="90"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const phases = [
+  { key:'work', label:'WORK', color:'var(--work)', mins:25 },
+  { key:'retrieval', label:'ACTIVE RETRIEVAL', color:'var(--retrieval)', mins:5 },
+  { key:'break', label:'BREAK', color:'var(--break)', mins:5 }
+];
+
+let state = {
+  phaseIndex: 0,
+  remaining: phases[0].mins * 60,
+  running: false,
+  count: 0
+};
+let timerId = null;
+
+const phaseLabel = document.getElementById('phaseLabel');
+const timeDisplay = document.getElementById('timeDisplay');
+const card = document.getElementById('card');
+const startBtn = document.getElementById('startBtn');
+const countVal = document.getElementById('countVal');
+const dots = document.querySelectorAll('.dot');
+
+function save(){
+  try{
+    localStorage.setItem('pomo_state', JSON.stringify({
+      phaseIndex: state.phaseIndex, remaining: state.remaining, count: state.count,
+      durations: phases.map(p=>p.mins)
+    }));
+  }catch(e){}
+}
+function load(){
+  try{
+    const raw = localStorage.getItem('pomo_state');
+    if(!raw) return;
+    const d = JSON.parse(raw);
+    if(d.durations){ d.durations.forEach((m,i)=>{ if(phases[i]) phases[i].mins = m; }); }
+    if(typeof d.count === 'number') state.count = d.count;
+    if(typeof d.phaseIndex === 'number') state.phaseIndex = d.phaseIndex;
+    if(typeof d.remaining === 'number') state.remaining = d.remaining;
+  }catch(e){}
+}
+
+function fmt(s){
+  const m = Math.floor(s/60), sec = s%60;
+  return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+}
+
+function render(){
+  const p = phases[state.phaseIndex];
+  phaseLabel.textContent = p.label;
+  phaseLabel.style.color = p.color;
+  card.style.boxShadow = '0 0 0 2px ' + p.color + '33';
+  timeDisplay.textContent = fmt(state.remaining);
+  timeDisplay.style.color = p.color;
+  dots.forEach((d,i)=>{
+    d.classList.toggle('active', i === state.phaseIndex);
+    d.style.color = p.color;
+  });
+  countVal.textContent = state.count;
+  startBtn.textContent = state.running ? 'Pause' : 'Start';
+  document.getElementById('setWork').value = phases[0].mins;
+  document.getElementById('setRetrieval').value = phases[1].mins;
+  document.getElementById('setBreak').value = phases[2].mins;
+}
+
+function tick(){
+  if(state.remaining > 0){
+    state.remaining--;
+    render();
+    save();
+  } else {
+    advancePhase();
+  }
+}
+
+function advancePhase(){
+  const wasBreak = phases[state.phaseIndex].key === 'break';
+  state.phaseIndex = (state.phaseIndex + 1) % phases.length;
+  state.remaining = phases[state.phaseIndex].mins * 60;
+  if(wasBreak) state.count++;
+  render();
+  save();
+}
+
+function startPause(){
+  state.running = !state.running;
+  if(state.running){
+    timerId = setInterval(tick, 1000);
+  } else {
+    clearInterval(timerId);
+  }
+  render();
+}
+
+document.getElementById('startBtn').addEventListener('click', startPause);
+document.getElementById('skipBtn').addEventListener('click', ()=>{ advancePhase(); });
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  state.running = false; clearInterval(timerId);
+  state.remaining = phases[state.phaseIndex].mins * 60;
+  render(); save();
+});
+document.getElementById('incCount').addEventListener('click', ()=>{ state.count++; render(); save(); });
+document.getElementById('decCount').addEventListener('click', ()=>{ state.count = Math.max(0, state.count-1); render(); save(); });
+
+document.getElementById('settingsToggle').addEventListener('click', ()=>{
+  document.getElementById('settingsPanel').classList.toggle('open');
+});
+function bindDurationInput(id, idx){
+  document.getElementById(id).addEventListener('change', (e)=>{
+    const val = Math.max(1, parseInt(e.target.value) || 1);
+    phases[idx].mins = val;
+    if(state.phaseIndex === idx && !state.running){
+      state.remaining = val * 60;
+    }
+    render(); save();
+  });
+}
+bindDurationInput('setWork', 0);
+bindDurationInput('setRetrieval', 1);
+bindDurationInput('setBreak', 2);
+
+load();
+render();
+</script>
+</body>
+</html>
